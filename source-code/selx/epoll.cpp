@@ -59,12 +59,6 @@ Server Server::listen(std::uint16_t port, Server::Handlers handlers)
 
     epoll_event osEpollEvent = {};
 
-    // NOTE: This is an abuse of the fact that signed-to-unsigned conversions
-    // are well-defined. I choose `u64` instead of `fd` because later I'll
-    // use the same field to store keys instead of descriptors. This is to
-    // avoid allocating custom structures to use in the `ptr` field.
-    //
-    // TODO: Remove misleading comment.
     osEpollEvent.data.fd = osListenerDescriptor;
     osEpollEvent.events = EPOLLIN | EPOLLERR;
 
