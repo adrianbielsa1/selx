@@ -3,7 +3,6 @@
 
 #include <cstdint>
 #include <functional>
-#include <map>
 #include <vector>
 
 namespace selx::epoll {
@@ -13,9 +12,9 @@ namespace selx::epoll {
         public:
 
             struct Handlers {
-                std::function<void(Server*, int)>                   handlePeerConnection;
-                std::function<void(Server*, int)>                   handlePeerDisconnection;
-                std::function<void(Server*, int, char*, ssize_t)>   handleDataArrival;
+                std::function<void(Server*, int)>                       handlePeerConnection;
+                std::function<void(Server*, int)>                       handlePeerDisconnection;
+                std::function<void(Server*, int, char*, std::size_t)>   handleDataArrival;
             };
 
             class Errors {
@@ -33,6 +32,7 @@ namespace selx::epoll {
 
                     class OpenEpoll : std::exception {};
                     class AttachEpoll : std::exception {};
+                    class DetachEpoll : std::exception {};
                     class WaitEpoll : std::exception {};
 
                     class BrokenListener : std::exception {};

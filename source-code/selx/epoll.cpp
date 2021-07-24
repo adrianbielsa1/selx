@@ -12,8 +12,11 @@ Server::~Server()
 {
     for (int osPeerDescriptor : this->osPeersDescriptors)
     {
+        ::epoll_ctl(this->osEpollDescriptor, EPOLL_CTL_DEL, osPeerDescriptor, NULL);
         ::close(osPeerDescriptor);
     }
+
+    ::epoll_ctl(this->osEpollDescriptor, EPOLL_CTL_DEL, this->osListenerDescriptor, NULL);
 
     ::close(this->osEpollDescriptor);
     ::close(this->osListenerDescriptor);
@@ -123,11 +126,24 @@ void Server::kick(int osPeerDescriptor)
     // NOTE: This can be optimized with a map of descriptors-to-indexes,
     // reducing this search's time complexity to O(log(n)). Since it is
     // not a priority, I choose the simplest solution.
-    std::remove(
+    auto iterator = std::find(
         std::begin(this->osPeersDescriptors), 
-        std::end(this->osPeersDescriptors),
+        std::end(this->osPeersDescriptors), 
         osPeerDescriptor
     );
+
+    if (std::end(this->osPeersDescriptors) != iterator)
+    {
+        // Swap-and-remove, to avoid moving down all elements above the
+        // iterator.
+        std::iter_swap(iterator, std::end(this->osPeersDescriptors) - 1);
+        this->osPeersDescriptors.pop_back();
+    }
+
+    if (-1 == ::epoll_ctl(this->osEpollDescriptor, EPOLL_CTL_DEL, osPeerDescriptor, NULL))
+    {
+        throw Server::Errors::DetachEpoll();
+    }
 
     if (-1 == ::close(osPeerDescriptor))
     {
@@ -207,6 +223,8 @@ void Server::read(int osPeerDescriptor)
     }
     else
     {
-        this->handlers.handleDataArrival(this, osPeerDescriptor, &buffer[0], bufferLength);
+        // NOTE: Casting from signed-to-unsigned is well-defined. Since `bufferLength` is greater
+        // than 0 from here on, casting it should not change the actual value (e.g. 10i8 == 10u8).
+        this->handlers.handleDataArrival(this, osPeerDescriptor, &buffer[0], (std::size_t) bufferLength);
     }
 }
