@@ -10,23 +10,23 @@ using namespace selx::epoll;
 
 Server::~Server()
 {
-    for (int osPeerDescriptor : this->osPeersDescriptors)
+    for (Server::Socket osPeerSocket : this->osPeersSockets)
     {
-        ::epoll_ctl(this->osEpollDescriptor, EPOLL_CTL_DEL, osPeerDescriptor, NULL);
-        ::close(osPeerDescriptor);
+        ::epoll_ctl(this->osEpollDescriptor, EPOLL_CTL_DEL, osPeerSocket, NULL);
+        ::close(osPeerSocket);
     }
 
-    ::epoll_ctl(this->osEpollDescriptor, EPOLL_CTL_DEL, this->osListenerDescriptor, NULL);
+    ::epoll_ctl(this->osEpollDescriptor, EPOLL_CTL_DEL, this->osListenerSocket, NULL);
 
     ::close(this->osEpollDescriptor);
-    ::close(this->osListenerDescriptor);
+    ::close(this->osListenerSocket);
 }
 
 Server Server::listen(std::uint16_t port, Server::Handlers handlers)
 {
-    int osListenerDescriptor = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    Server::Socket osListenerSocket = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     
-    if (-1 == osListenerDescriptor)
+    if (-1 == osListenerSocket)
     {
         throw Server::Errors::OpenSocket();
     }
@@ -37,18 +37,18 @@ Server Server::listen(std::uint16_t port, Server::Handlers handlers)
     osAddress.sin_addr.s_addr = INADDR_ANY;
     osAddress.sin_port = ::htons(port);
 
-    if (-1 == ::bind(osListenerDescriptor, (sockaddr*) &osAddress, sizeof(osAddress)))
+    if (-1 == ::bind(osListenerSocket, (sockaddr*) &osAddress, sizeof(osAddress)))
     {
         throw Server::Errors::BindSocket();
     }
 
-    if (-1 == ::listen(osListenerDescriptor, 128))
+    if (-1 == ::listen(osListenerSocket, 128))
     {
         throw Server::Errors::ListenSocket();
     }
 
     // TODO: Retrieve old flags?
-    if (-1 == ::fcntl(osListenerDescriptor, F_SETFL, O_NONBLOCK))
+    if (-1 == ::fcntl(osListenerSocket, F_SETFL, O_NONBLOCK))
     {
         throw Server::Errors::UnblockSocket();
     }
@@ -62,17 +62,17 @@ Server Server::listen(std::uint16_t port, Server::Handlers handlers)
 
     epoll_event osEpollEvent = {};
 
-    osEpollEvent.data.fd = osListenerDescriptor;
+    osEpollEvent.data.fd = osListenerSocket;
     osEpollEvent.events = EPOLLIN | EPOLLERR;
 
     if (-1 == ::epoll_ctl(
-        osEpollDescriptor, EPOLL_CTL_ADD, osListenerDescriptor, &osEpollEvent
+        osEpollDescriptor, EPOLL_CTL_ADD, osListenerSocket, &osEpollEvent
     ))
     {
         throw Server::Errors::AttachEpoll();
     }
 
-    return Server(osListenerDescriptor, osEpollDescriptor, handlers);
+    return Server(osListenerSocket, osEpollDescriptor, handlers);
 }
 
 void Server::poll()
@@ -87,7 +87,7 @@ void Server::poll()
 
     for (int i = 0; i < osEpollEventsCount; i++)
     {
-        if (osEpollEvents[i].data.fd == this->osListenerDescriptor)
+        if (osEpollEvents[i].data.fd == this->osListenerSocket)
         {
             if (osEpollEvents[i].events & EPOLLERR)
             {
@@ -113,53 +113,57 @@ void Server::poll()
     }
 }
 
-void Server::send(int osPeerDescriptor, char* buffer, std::size_t bufferLength)
+void Server::send(Server::Socket osPeerSocket, char* buffer, std::size_t bufferLength)
 {
-    if (-1 == ::send(osPeerDescriptor, (void*) buffer, bufferLength, 0))
+    if (-1 == ::send(osPeerSocket, (void*) buffer, bufferLength, 0))
     {
         throw Server::Errors::WriteSocket();
     }
 }
 
-void Server::kick(int osPeerDescriptor)
+void Server::kick(Server::Socket osPeerSocket)
 {
     // NOTE: This can be optimized with a map of descriptors-to-indexes,
     // reducing this search's time complexity to O(log(n)). Since it is
     // not a priority, I choose the simplest solution.
     auto iterator = std::find(
-        std::begin(this->osPeersDescriptors), 
-        std::end(this->osPeersDescriptors), 
-        osPeerDescriptor
+        std::begin(this->osPeersSockets), 
+        std::end(this->osPeersSockets), 
+        osPeerSocket
     );
 
-    if (std::end(this->osPeersDescriptors) != iterator)
+    if (std::end(this->osPeersSockets) != iterator)
     {
         // Swap-and-remove, to avoid moving down all elements above the
         // iterator.
-        std::iter_swap(iterator, std::end(this->osPeersDescriptors) - 1);
-        this->osPeersDescriptors.pop_back();
+        std::iter_swap(iterator, std::end(this->osPeersSockets) - 1);
+        this->osPeersSockets.pop_back();
     }
 
-    if (-1 == ::epoll_ctl(this->osEpollDescriptor, EPOLL_CTL_DEL, osPeerDescriptor, NULL))
+    if (-1 == ::epoll_ctl(this->osEpollDescriptor, EPOLL_CTL_DEL, osPeerSocket, NULL))
     {
         throw Server::Errors::DetachEpoll();
     }
 
-    if (-1 == ::close(osPeerDescriptor))
+    if (-1 == ::close(osPeerSocket))
     {
         throw Server::Errors::CloseSocket();
     }
     else
     {
-        this->handlers.handlePeerDisconnection(this, osPeerDescriptor);
+        this->handlers.handlePeerDisconnection(this, osPeerSocket);
     }
 }
 
-Server::Server(int osListenerDescriptor, int osEpollDescriptor, Server::Handlers handlers)
+Server::Server(
+	Server::Socket osListenerSocket,
+	int osEpollDescriptor,
+	Server::Handlers handlers
+)
 {
-    this->osListenerDescriptor = osListenerDescriptor;
+    this->osListenerSocket = osListenerSocket;
     this->osEpollDescriptor = osEpollDescriptor;
-    this->osPeersDescriptors = {};
+    this->osPeersSockets = {};
     this->handlers = handlers;
 }
 
@@ -167,9 +171,9 @@ void Server::accept()
 {
     sockaddr osAddress = {};
     socklen_t osAddressLength = {};
-    int osPeerDescriptor = ::accept(this->osListenerDescriptor, &osAddress, &osAddressLength);
+    Server::Socket osPeerSocket = ::accept(this->osListenerSocket, &osAddress, &osAddressLength);
 
-    if (-1 == osPeerDescriptor)
+    if (-1 == osPeerSocket)
     {
         if ((EAGAIN == errno) || (EWOULDBLOCK == errno))
         {
@@ -186,32 +190,32 @@ void Server::accept()
     else
     {
         // TODO: Retrieve old flags?
-        if (-1 == ::fcntl(osPeerDescriptor, F_SETFL, O_NONBLOCK))
+        if (-1 == ::fcntl(osPeerSocket, F_SETFL, O_NONBLOCK))
         {
             throw Server::Errors::UnblockSocket();
         }
 
         epoll_event osEpollEvent = {};
 
-        osEpollEvent.data.fd = osPeerDescriptor;
+        osEpollEvent.data.fd = osPeerSocket;
         osEpollEvent.events = EPOLLIN | EPOLLERR;
 
         if (-1 == ::epoll_ctl(
-            this->osEpollDescriptor, EPOLL_CTL_ADD, osPeerDescriptor, &osEpollEvent
+            this->osEpollDescriptor, EPOLL_CTL_ADD, osPeerSocket, &osEpollEvent
         ))
         {
             throw Server::Errors::AttachEpoll();
         }
 
-        this->osPeersDescriptors.push_back(osPeerDescriptor);
-        this->handlers.handlePeerConnection(this, osPeerDescriptor);
+        this->osPeersSockets.push_back(osPeerSocket);
+        this->handlers.handlePeerConnection(this, osPeerSocket);
     }
 }
 
-void Server::read(int osPeerDescriptor)
+void Server::read(Server::Socket osPeerSocket)
 {
     char buffer[1028];
-    ssize_t bufferLength = ::read(osPeerDescriptor, &buffer[0], 1028);
+    ssize_t bufferLength = ::read(osPeerSocket, &buffer[0], 1028);
 
     if (-1 == bufferLength)
     {
@@ -219,12 +223,16 @@ void Server::read(int osPeerDescriptor)
     }
     else if (0 == bufferLength)
     {
-        this->kick(osPeerDescriptor);
+        this->kick(osPeerSocket);
     }
     else
     {
         // NOTE: Casting from signed-to-unsigned is well-defined. Since `bufferLength` is greater
         // than 0 from here on, casting it should not change the actual value (e.g. 10i8 == 10u8).
-        this->handlers.handleDataArrival(this, osPeerDescriptor, &buffer[0], (std::size_t) bufferLength);
+        this->handlers.handleDataArrival(
+			this, osPeerSocket,
+			&buffer[0],
+			(std::size_t) bufferLength
+		);
     }
 }

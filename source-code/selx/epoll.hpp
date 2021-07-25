@@ -11,10 +11,12 @@ namespace selx::epoll {
 
         public:
 
+			using Socket = int;
+
             struct Handlers {
-                std::function<void(Server*, int)>                       handlePeerConnection;
-                std::function<void(Server*, int)>                       handlePeerDisconnection;
-                std::function<void(Server*, int, char*, std::size_t)>   handleDataArrival;
+                std::function<void(Server*, Socket)>                       	handlePeerConnection;
+                std::function<void(Server*, Socket)>                       	handlePeerDisconnection;
+                std::function<void(Server*, Socket, char*, std::size_t)>	handleDataArrival;
             };
 
             class Errors {
@@ -54,20 +56,24 @@ namespace selx::epoll {
 
             Server static listen(std::uint16_t port, Handlers handlers);
             void poll();
-            void send(int osPeerDescriptor, char* buffer, std::size_t bufferLength);
-            void kick(int osPeerDescriptor);
+            void send(Socket osPeerSocket, char* buffer, std::size_t bufferLength);
+            void kick(Socket osPeerSocket);
 
         private:
 
-            int                 osListenerDescriptor;
+            Socket             	osListenerSocket;
             int                 osEpollDescriptor;
-            std::vector<int>    osPeersDescriptors;
+            std::vector<Socket>	osPeersSockets;
             Handlers            handlers;
 
-            Server(int osListenerDescriptor, int osEpollDescriptor, Handlers handlers);
+            Server(
+				Socket osListenerSocket,
+				int osEpollDescriptor,
+				Handlers handlers
+			);
 
             void accept();
-            void read(int osPeerDescriptor);
+            void read(Socket osPeerSocket);
 
     };
 

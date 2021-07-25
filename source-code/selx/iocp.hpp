@@ -12,10 +12,12 @@ namespace selx::iocp {
 
         public:
 
+			using Socket = unsigned int;
+
             struct Handlers {
-                std::function<void(Server*, unsigned int)>                      handlePeerConnection;
-                std::function<void(Server*, unsigned int)>                      handlePeerDisconnection;
-                std::function<void(Server*, unsigned int, char*, std::size_t)>  handleDataArrival;
+                std::function<void(Server*, Socket)>                      	handlePeerConnection;
+                std::function<void(Server*, Socket)>                      	handlePeerDisconnection;
+                std::function<void(Server*, Socket, char*, std::size_t)>	handleDataArrival;
             };
 
             class Errors {
@@ -56,20 +58,20 @@ namespace selx::iocp {
 
             Server static listen(std::uint16_t port, Handlers handlers);
             void poll();
-            void send(unsigned int osPeerDescriptor, char* buffer, std::size_t bufferLength);
-            void kick(unsigned int osPeerDescriptor);
+            void send(Socket osPeerSocket, char* buffer, std::size_t bufferLength);
+            void kick(Socket osPeerSocket);
 
         private:
 
             struct Waitable {
-                unsigned int        osDescriptor;
+                Socket        		osSocket;
                 OVERLAPPED          osOverlapped;
                 char                osBuffer[1028];
             };
 
             Waitable*               osListenerWaitable;
-            unsigned int            osListenerDescriptor;
-            unsigned int            osListenerPeerDescriptor;
+            Socket            		osListenerSocket;
+            Socket            		osListenerPeerSocket;
             void*                   osIocpDescriptor;
             void*                   osAcceptExFunction;
             std::list<Waitable>     osPeersWaitables;
@@ -77,7 +79,7 @@ namespace selx::iocp {
 
             Server(
                 Waitable* osListenerWaitable,
-                unsigned int osListenerPeerDescriptor,
+                Socket osListenerPeerSocket,
                 void* osIocpDescriptor,
                 void* osAcceptExFunction,
                 Handlers handlers

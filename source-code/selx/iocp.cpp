@@ -9,11 +9,11 @@ Server::~Server()
 {
     for (Waitable osWaitable : this->osPeersWaitables)
     {
-        ::closesocket(osWaitable.osDescriptor);
+        ::closesocket(osWaitable.osSocket);
     }
 
-    ::closesocket(this->osListenerPeerDescriptor);
-    ::closesocket(this->osListenerDescriptor);
+    ::closesocket(this->osListenerPeerSocket);
+    ::closesocket(this->osListenerSocket);
     ::CloseHandle(this->osIocpDescriptor);
 }
 
@@ -27,11 +27,11 @@ Server Server::listen(std::uint16_t port, Server::Handlers handlers)
         throw Server::Errors::OpenAPI();
     }
 
-    unsigned int osListenerDescriptor = ::WSASocket(
+    Server::Socket osListenerSocket = ::WSASocket(
         AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, WSA_FLAG_OVERLAPPED
     );
 
-    if (INVALID_SOCKET == osListenerDescriptor)
+    if (INVALID_SOCKET == osListenerSocket)
     {
         throw Server::Errors::OpenSocket();
     }
@@ -42,19 +42,19 @@ Server Server::listen(std::uint16_t port, Server::Handlers handlers)
     osAddress.sin_addr.s_addr = INADDR_ANY;
     osAddress.sin_port = ::htons(port);
 
-    if (SOCKET_ERROR == ::bind(osListenerDescriptor, (sockaddr*) &osAddress, sizeof(osAddress)))
+    if (SOCKET_ERROR == ::bind(osListenerSocket, (sockaddr*) &osAddress, sizeof(osAddress)))
     {
         throw Server::Errors::BindSocket();
     }
 
-    if (SOCKET_ERROR == ::listen(osListenerDescriptor, 128))
+    if (SOCKET_ERROR == ::listen(osListenerSocket, 128))
     {
         throw Server::Errors::ListenSocket();
     }
 
     u_long osNonBlocking = 1;
 
-    if (SOCKET_ERROR == ::ioctlsocket(osListenerDescriptor, FIONBIO, &osNonBlocking))
+    if (SOCKET_ERROR == ::ioctlsocket(osListenerSocket, FIONBIO, &osNonBlocking))
     {
         throw Server::Errors::UnblockSocket();
     }
@@ -74,7 +74,7 @@ Server Server::listen(std::uint16_t port, Server::Handlers handlers)
 
     // Load the AcceptEx function into memory using `WSAIoctl`.
     if (SOCKET_ERROR == ::WSAIoctl(
-        osListenerDescriptor,
+        osListenerSocket,
         SIO_GET_EXTENSION_FUNCTION_POINTER,
         &osAcceptExGUID,
         sizeof(osAcceptExGUID),
@@ -89,13 +89,13 @@ Server Server::listen(std::uint16_t port, Server::Handlers handlers)
     }
 
     Waitable* osListenerWaitable = new Waitable {
-        .osDescriptor = osListenerDescriptor,
+        .osSocket = osListenerSocket,
         .osOverlapped = {},
         .osBuffer = {},
     };
 
     if (NULL == ::CreateIoCompletionPort(
-        (HANDLE) osListenerDescriptor,
+        (HANDLE) osListenerSocket,
         osIocpDescriptor,
         (ULONG_PTR) osListenerWaitable,
         0
@@ -104,11 +104,11 @@ Server Server::listen(std::uint16_t port, Server::Handlers handlers)
         throw Server::Errors::AttachIocp();
     }
 
-    unsigned int osListenerPeerDescriptor = ::WSASocket(
+    Server::Socket osListenerPeerSocket = ::WSASocket(
         AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, WSA_FLAG_OVERLAPPED
     );
 
-    if (INVALID_SOCKET == osListenerPeerDescriptor)
+    if (INVALID_SOCKET == osListenerPeerSocket)
     {
         throw Server::Errors::OpenSocket();
     }
@@ -116,8 +116,8 @@ Server Server::listen(std::uint16_t port, Server::Handlers handlers)
     DWORD osListenerBytesTransferred = {};
 
     if (FALSE == osAcceptExFunction(
-        osListenerWaitable->osDescriptor,
-        osListenerPeerDescriptor,
+        osListenerWaitable->osSocket,
+        osListenerPeerSocket,
         (void*) &osListenerWaitable->osBuffer[0],
         0,
         sizeof(sockaddr_in) + 16,
@@ -134,7 +134,7 @@ Server Server::listen(std::uint16_t port, Server::Handlers handlers)
 
     return Server(
         osListenerWaitable,
-        osListenerPeerDescriptor,
+        osListenerPeerSocket,
         osIocpDescriptor,
         (void*) osAcceptExFunction,
         handlers
@@ -164,7 +164,7 @@ void Server::poll()
     {
         Waitable* osWaitable = (Waitable*) completionKey;
 
-        if (this->osListenerDescriptor == osWaitable->osDescriptor)
+        if (this->osListenerSocket == osWaitable->osSocket)
         {
             this->accept();
         }
@@ -175,21 +175,21 @@ void Server::poll()
     }
 }
 
-void Server::send(unsigned int osPeerDescriptor, char* buffer, std::size_t bufferLength)
+void Server::send(Server::Socket osPeerSocket, char* buffer, std::size_t bufferLength)
 {
-    if (SOCKET_ERROR == ::send(osPeerDescriptor, buffer, bufferLength, 0))
+    if (SOCKET_ERROR == ::send(osPeerSocket, buffer, bufferLength, 0))
     {
         throw Server::Errors::WriteSocket();
     }
 }
 
-void Server::kick(unsigned int osPeerDescriptor)
+void Server::kick(Server::Socket osPeerSocket)
 {
     auto iterator = std::find_if(
         std::begin(this->osPeersWaitables),
         std::end(this->osPeersWaitables),
         [&osPeerDescriptor](const Waitable& waitable) {
-            return osPeerDescriptor == waitable.osDescriptor;
+            return osPeerDescriptor == waitable.osSocket;
         }
     );
 
@@ -208,15 +208,15 @@ void Server::kick(unsigned int osPeerDescriptor)
 
 Server::Server(
     Waitable* osListenerWaitable,
-    unsigned int osListenerPeerDescriptor,
+    Server::Socket osListenerPeerSocket,
     void* osIocpDescriptor,
     void* osAcceptExFunction,
     Handlers handlers
 )
 {
     this->osListenerWaitable = osListenerWaitable;
-    this->osListenerDescriptor = osListenerWaitable->osDescriptor;
-    this->osListenerPeerDescriptor = osListenerPeerDescriptor;
+    this->osListenerSocket = osListenerWaitable->osSocket;
+    this->osListenerPeerSocket = osListenerPeerSocket;
     this->osIocpDescriptor = osIocpDescriptor;
     this->osAcceptExFunction = osAcceptExFunction;
     this->osPeersWaitables = {};
@@ -226,10 +226,10 @@ Server::Server(
 void Server::accept()
 {
     if (SOCKET_ERROR == ::setsockopt(
-        this->osListenerPeerDescriptor,
+        this->osListenerPeerSocket,
         SOL_SOCKET,
         SO_UPDATE_ACCEPT_CONTEXT,
-        (char*) &this->osListenerDescriptor,
+        (char*) &this->osListenerSocket,
         sizeof(SOCKET)
     ))
     {
@@ -238,13 +238,13 @@ void Server::accept()
 
     u_long osNonBlocking = 1;
 
-    if (SOCKET_ERROR == ::ioctlsocket(this->osListenerPeerDescriptor, FIONBIO, &osNonBlocking))
+    if (SOCKET_ERROR == ::ioctlsocket(this->osListenerPeerSocket, FIONBIO, &osNonBlocking))
     {
         throw Server::Errors::UnblockSocket();
     }
 
     this->osPeersWaitables.push_back(Waitable {
-        .osDescriptor = this->osListenerPeerDescriptor,
+        .osSocket = this->osListenerPeerSocket,
         .osOverlapped = {},
         .osBuffer = {},
     });
@@ -252,7 +252,7 @@ void Server::accept()
     Waitable* osPeerWaitable = &this->osPeersWaitables.back();
 
     if (NULL == ::CreateIoCompletionPort(
-        (HANDLE) this->osListenerPeerDescriptor,
+        (HANDLE) this->osListenerPeerSocket,
         osIocpDescriptor,
         (ULONG_PTR) osPeerWaitable,
         0
@@ -261,7 +261,7 @@ void Server::accept()
         throw Server::Errors::AttachIocp();
     }
 
-    this->handlers.handlePeerConnection(this, this->osListenerPeerDescriptor);
+    this->handlers.handlePeerConnection(this, this->osListenerPeerSocket);
 
     WSABUF osBuffer;
 
@@ -271,7 +271,7 @@ void Server::accept()
     DWORD osFlags;
 
     if (SOCKET_ERROR == ::WSARecv(
-        osPeerWaitable->osDescriptor,
+        osPeerWaitable->osSocket,
         &osBuffer,
         1,
         NULL,
@@ -286,11 +286,11 @@ void Server::accept()
         }
     }
 
-    this->osListenerPeerDescriptor = ::WSASocket(
+    this->osListenerPeerSocket = ::WSASocket(
         AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, WSA_FLAG_OVERLAPPED
     );
 
-    if (INVALID_SOCKET == osListenerPeerDescriptor)
+    if (INVALID_SOCKET == osListenerPeerSocket)
     {
         throw Server::Errors::OpenSocket();
     }
@@ -298,8 +298,8 @@ void Server::accept()
     DWORD osListenerBytesTransferred = {};
 
     if (FALSE == ((LPFN_ACCEPTEX)(this->osAcceptExFunction))(
-        this->osListenerWaitable->osDescriptor,
-        this->osListenerPeerDescriptor,
+        this->osListenerWaitable->osSocket,
+        this->osListenerPeerSocket,
         (void*) &this->osListenerWaitable->osBuffer[0],
         0,
         sizeof(sockaddr_in) + 16,
@@ -319,13 +319,13 @@ void Server::read(Waitable* osWaitable, std::uint32_t osLength)
 {
     if (0 == osLength)
     {
-        this->kick(osWaitable->osDescriptor);
+        this->kick(osWaitable->osSocket);
     }
     else
     {
         this->handlers.handleDataArrival(
             this,
-            osWaitable->osDescriptor,
+            osWaitable->osSocket,
             &osWaitable->osBuffer[0],
             osLength
         );
@@ -338,7 +338,7 @@ void Server::read(Waitable* osWaitable, std::uint32_t osLength)
         DWORD osFlags;
 
         if (SOCKET_ERROR == ::WSARecv(
-            osWaitable->osDescriptor,
+            osWaitable->osSocket,
             &osBuffer,
             1,
             NULL,
