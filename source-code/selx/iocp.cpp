@@ -188,8 +188,8 @@ void Server::kick(Server::Socket osPeerSocket)
     auto iterator = std::find_if(
         std::begin(this->osPeersWaitables),
         std::end(this->osPeersWaitables),
-        [&osPeerDescriptor](const Waitable& waitable) {
-            return osPeerDescriptor == waitable.osSocket;
+        [&osPeerSocket](const Waitable& waitable) {
+            return osPeerSocket == waitable.osSocket;
         }
     );
 
@@ -198,12 +198,12 @@ void Server::kick(Server::Socket osPeerSocket)
         this->osPeersWaitables.erase(iterator);
     }
 
-    if (SOCKET_ERROR == ::closesocket(osPeerDescriptor))
+    if (SOCKET_ERROR == ::closesocket(osPeerSocket))
     {
         throw Server::Errors::CloseSocket();
     }
 
-    this->handlers.handlePeerDisconnection(this, osPeerDescriptor);
+    this->handlers.handlePeerDisconnection(this, osPeerSocket);
 }
 
 Server::Server(
