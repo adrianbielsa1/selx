@@ -11,7 +11,7 @@ namespace selx::epoll {
 
         public:
 
-			using Socket = int;
+            using Socket = int;
 
             struct Handlers {
                 std::function<void(Server*, Socket)>                       	handlePeerConnection;
@@ -67,10 +67,10 @@ namespace selx::epoll {
             Handlers            handlers;
 
             Server(
-				Socket osListenerSocket,
-				int osEpollDescriptor,
-				Handlers handlers
-			);
+                Socket osListenerSocket,
+                int osEpollDescriptor,
+                Handlers handlers
+            );
 
             void accept();
             void read(Socket osPeerSocket);

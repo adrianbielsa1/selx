@@ -156,9 +156,9 @@ void Server::kick(Server::Socket osPeerSocket)
 }
 
 Server::Server(
-	Server::Socket osListenerSocket,
-	int osEpollDescriptor,
-	Server::Handlers handlers
+    Server::Socket osListenerSocket,
+    int osEpollDescriptor,
+    Server::Handlers handlers
 )
 {
     this->osListenerSocket = osListenerSocket;
@@ -230,9 +230,9 @@ void Server::read(Server::Socket osPeerSocket)
         // NOTE: Casting from signed-to-unsigned is well-defined. Since `bufferLength` is greater
         // than 0 from here on, casting it should not change the actual value (e.g. 10i8 == 10u8).
         this->handlers.handleDataArrival(
-			this, osPeerSocket,
-			&buffer[0],
-			(std::size_t) bufferLength
-		);
+            this, osPeerSocket,
+            &buffer[0],
+            (std::size_t) bufferLength
+        );
     }
 }

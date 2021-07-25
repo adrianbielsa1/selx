@@ -12,7 +12,7 @@ namespace selx::iocp {
 
         public:
 
-			using Socket = unsigned int;
+            using Socket = unsigned int;
 
             struct Handlers {
                 std::function<void(Server*, Socket)>                      	handlePeerConnection;
